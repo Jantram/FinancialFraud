@@ -1,109 +1,149 @@
-# In-house Fin-JEPA and T-JEPA Fraud Analysis
-
-Self-supervised fraud detection on the in-house transaction dataset using two JEPA-based anomaly scorers trained entirely without fraud labels.
-
----
+# In-House JEPA Fraud Analysis
 
 ## Overview
 
-Two complementary architectures are trained and evaluated:
+This repository contains the documented, executed notebook for JEPA-based fraud detection on the in-house synthetic payment-fraud dataset. The experiment compares **Fin-JEPA** with a corrected, source-aligned **T-JEPA** baseline.
 
-**Fin-JEPA** (sequence-level) — encodes customer transaction histories as sliding windows and trains a causal Transformer to predict the latent representation of the next transaction. Prediction error at inference time is the anomaly score.
+The complete notebook is:
 
-**T-JEPA** (feature-level) — treats a single transaction as a set of feature tokens and learns to reconstruct masked features from visible context features. Reconstruction error over target features is the anomaly score.
+`inhouse_jepa_analysis.ipynb`
 
-Both models are trained on train-split data with no fraud labels. Evaluation uses the official test split against held-out ground truth labels across four fraud typologies: ring, ATO (account takeover), emerge, and normal.
-
----
+The notebook preserves the original executable code and outputs and adds Markdown cells documenting each major stage for reproducibility.
 
 ## Dataset
 
-The notebook expects the in-house dataset from Kaggle at the path below. Edit `BASE` / `DATA_DIR` in the first cells if running elsewhere.
+The executed notebook loads:
 
+- `label_timeline.csv`
+- `sequences.csv`
+- `_ground_truth.csv`
+- `dataset_card.txt`
+
+The loaded tables contain **43,716 transaction rows**. The experiment uses the dataset-provided `split` column and keeps the supplied time-based train/test separation.
+
+The notebook's original input path is:
+
+`/kaggle/input/datasets/abhradwiplala/in-house-dataset`
+
+When reproducing outside Kaggle, update the path in the notebook to the location of the dataset.
+
+## Reproducibility and split
+
+Random seed: **42**.
+
+Executed split:
+
+| Split | Transactions |
+|---|---:|
+| Train | 22,991 |
+| Test | 20,725 |
+
+The notebook does not replace this official split with a random train/test split.
+
+## Features and preprocessing
+
+The model uses **35 features**:
+
+- 23 numeric features
+- 12 categorical features
+
+The executed preprocessing produces a `43,716 × 35` feature matrix with no remaining NaN or infinite values. The leakage-safe train/test matrices are:
+
+- `X_train`: **22,991 × 35**
+- `X_test`: **20,725 × 35**
+
+## Fin-JEPA
+
+Fin-JEPA creates chronological customer windows with:
+
+- Context length: **4** transactions
+- Prediction length: **1** transaction
+- Stride: **1**
+- Minimum customer history: **3** transactions
+- Embedding dimension: **64**
+- Training epochs: **20**
+- Learning rate: **1e-4**
+- Weight decay: **1e-5**
+
+Executed window counts:
+
+- Train windows: **11,670**
+- Test windows: **9,632**
+
+The Fin-JEPA test population contains **107 fraud** and **9,525 non-fraud** transactions (fraud rate **1.1109%**).
+
+### Final Fin-JEPA result
+
+| Metric | Result |
+|---|---:|
+| ROC-AUC | **0.9259** |
+| PR-AUC / Average Precision | **0.2104** |
+| Fraud cases | **107** |
+| Non-fraud cases | **9,525** |
+
+Best training checkpoint: **epoch 19**, training loss **0.0350864**.
+
+## T-JEPA
+
+The notebook first contains an initial T-JEPA implementation. It explicitly identifies that implementation as architecturally incorrect. Its earlier result of **ROC-AUC 0.5230 / PR-AUC 0.0109 is not the final T-JEPA result**.
+
+The corrected source-aligned T-JEPA uses:
+
+- 35 features
+- Embedding dimension: **128**
+- 4 attention heads
+- 3 encoder layers
+- 2 predictor layers
+- EMA decay: **0.996**
+- 30 training epochs
+
+Corrected model parameter count:
+
+- Total parameters: **1,613,440**
+- Trainable parameters: **1,013,376**
+
+Best corrected checkpoint: **epoch 30**, training loss **0.036538**.
+
+### Final corrected T-JEPA result
+
+The corrected model is evaluated on the **same 9,632 transactions** used by Fin-JEPA:
+
+| Metric | Result |
+|---|---:|
+| ROC-AUC | **0.7534** |
+| PR-AUC / Average Precision | **0.0287** |
+| Fraud cases | **107** |
+| Non-fraud cases | **9,525** |
+
+## Fin-JEPA vs T-JEPA
+
+Both models are compared on the same 9,632-transaction population.
+
+| Model | ROC-AUC | PR-AUC |
+|---|---:|---:|
+| **Fin-JEPA** | **0.9259** | **0.2104** |
+| **Corrected T-JEPA** | **0.7534** | **0.0287** |
+
+The notebook also generates precision-at-recall tables and a common precision-recall curve.
+
+## Reproducing the experiment
+
+1. Obtain the supplied in-house dataset.
+2. Place it at the expected input location or update the path variables in the notebook.
+3. Open `inhouse_jepa_analysis.ipynb`.
+4. Run the cells in order in a CUDA-capable environment if reproducing the original execution.
+5. Keep the provided time-based `split` column.
+6. Check the final common-test evaluation cells for the reported metrics.
+
+## Repository contents
+
+```text
+inhouse-jepa-fraud-analysis/
+├── .gitignore
+├── README.md
+└── inhouse_jepa_analysis.ipynb
 ```
-/kaggle/input/datasets/abhradwiplala/in-house-dataset/
-    sequences.csv          # one row per transaction; features + seq_pos + customer_id
-    label_timeline.csv     # noisy real-time labels (EFW, review, dispute, refund)
-    _ground_truth.csv      # held-out true fraud labels + typology
-```
 
-`label_timeline` is intentionally partial and noisy — it reflects what a real system sees at transaction time. The gap between its positive rate and the ground-truth fraud rate is the core modelling challenge the dataset is designed to test.
+## Important result note
 
----
-
-## Notebook structure
-
-### Part 1: Data preparation (Steps 1–5)
-- Load and merge the three source tables
-- Build a combined `train_label` from all noisy label channels
-- Encode categoricals, impute and standardise numeric features using train-split statistics only
-- Construct Fin-JEPA sliding windows (`context_len=4`, `pred_len=1`, stride 1)
-- Verify ID mapping, official train/test split, window counts, and ground-truth alignment
-
-### Part 2: Fin-JEPA training and evaluation (Steps 6–11)
-- `PriceEncoder`: per-transaction MLP encoder (features → 64-dim embedding)
-- `TransformerPredictor`: 4-layer causal Transformer predicts the next transaction's latent
-- `SIGReg`: Spectral Information Geometry regulariser prevents embedding collapse
-- `FinJEPA`: combines encoder, predictor, frozen EMA target encoder, and SIGReg
-- Training: 20 epochs, AdamW + cosine LR schedule, gradient clipping
-- Evaluation: ROC-AUC, PR-AUC, Precision/Recall@K, precision at fixed recall, per-typology breakdown
-
-### Part 3: T-JEPA training and evaluation (Steps 12–22)
-- `FeatureTokenizer`: converts each scalar feature to a 128-dim token (value projection + learned position embedding)
-- `ContextEncoder`: Transformer over visible (context) feature tokens
-- `TargetEncoder`: EMA copy of context encoder; frozen, no gradients
-- `TargetPredictor`: predicts target token representations from context summary + feature identity
-- `FeatureMasker`: generates disjoint context (75–85%) / target (15–25%) feature masks per sample
-- `TJEPA`: assembles all components; EMA decay increases 0.996 → 0.999 over 30 epochs
-- Anomaly score: mean cosine error between predicted and EMA target tokens for masked features
-
-Note: the original `TargetPredictor` (Step 13) contains a dimension bug. Step 14A replaces it with a corrected version before training begins.
-
-### Part 4: Joint evaluation on the common test set (Steps 24–29)
-- Both models are compared on exactly 9,632 transactions (the Fin-JEPA window targets)
-- Metrics: ROC-AUC, PR-AUC, Precision/Recall@K, precision at fixed recall
-- Per-typology evaluation against a clean normal-non-fraud reference set
-
-### Part 5: Typology and failure analysis (Steps 28–29, emerge section)
-- Emerge typology analysis: train vs. test distribution, timeline, entity overlap
-- Failure grouping: each fraud case labelled as detected by both / Fin-JEPA only / T-JEPA only / both missed
-- Feature distribution comparison between jointly-missed and detected fraud cases
-
-### Part 6: Deterministic T-JEPA scoring and feature sensitivity (Steps 28A–28J)
-- Fixed evaluation masks (seed 12345) enable reproducible scores across runs
-- `score_tjepa_fixed`: scoring function that accepts pre-generated masks
-- Permutation sensitivity: each feature is replaced with its training-set median baseline; mean absolute score change measures reliance on that feature
-- Sensitivity is compared between jointly-missed and detected fraud cases to identify which features distinguish them
-
----
-
-## Key design decisions
-
-**No label leakage.** All normalisation statistics (mean, std, median) are computed on the train split and applied to the test split. Ground-truth labels are used only for final evaluation, never during training.
-
-**Anomaly score semantics.** Higher score = harder to predict / reconstruct = more anomalous. Neither model is given any fraud signal during training.
-
-**Common evaluation set.** Fin-JEPA operates on windows (one score per window, not per transaction). The final comparison uses only transactions that appear as Fin-JEPA window targets, giving both models an identical set of 9,632 scored transactions.
-
-**EMA target encoder.** Both models use a momentum copy of the encoder as a stable prediction target. This is standard JEPA practice to prevent representation collapse without contrastive negatives.
-
----
-
-## Requirements
-
-```
-pandas
-numpy
-torch
-scikit-learn
-```
-
-The notebook was developed on the Kaggle Python Docker image (CUDA available). CPU execution will work but training will be significantly slower.
-
----
-
-## Running the notebook
-
-Run cells top to bottom. The notebook is self-contained; no manual checkpointing or intermediate saves are required. The diagnostic sections (Steps 4A, 14B, 14D, 27A, and the diagnostics block) can be skipped on re-runs once the models are trained — they exist to verify state at development time.
-
-To use the notebook outside Kaggle, update `BASE` and `DATA_DIR` near the top of Part 1 to point to the local dataset directory.
+Only the final executed metrics are reported as the final comparison. The notebook itself records the earlier incorrect T-JEPA result and explicitly rejects it, so it should not be presented as the final baseline.
