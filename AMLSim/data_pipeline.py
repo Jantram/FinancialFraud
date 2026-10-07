@@ -1,18 +1,31 @@
 """
-Data pipeline for AMLSim -> Fin-JEPA input format.
+AMLSim data preprocessing reference for the Fin-JEPA experiment.
 
-The original repo's data.py (stock price windowing) is not public. This file is a from-scratch
-replacement, following the same (context, target) windowing contract the model expects, applied
-to bank-account transaction histories instead of daily stock prices.
+NOTE:
+The executable preprocessing and window-building code is contained in
+`finjepa (1).ipynb`, which is the authoritative reproducibility source
+for this experiment.
 
-Entity analogy: ACCOUNT (AMLSim) <-> STOCK TICKER (original Fin-JEPA)
-Sequence analogy: transaction, ordered by TIMESTAMP <-> daily price row, ordered by date
+This file documents the exact preprocessing contract used by the notebook.
 
-Pipeline steps:
-1. Combine sent + received transactions per account into one time-ordered history
-   (direction flag distinguishes outgoing vs incoming).
-2. Feature engineering: log1p(amount), direction (0/1), time gap since previous transaction.
-   Standardized using TRAIN-split statistics only.
-3. Account-level train/val/test split (70/15/15) -- NOT time-based, to prevent leakage of the
-   same account's future into training.
-4. Sliding window per account: context_len=15, pred_len=5, stride=5.
+Pipeline:
+1. Load AMLSim `accounts.csv`, `transactions.csv`, and `alerts.csv`.
+2. Convert sent and received transactions into a single account-level
+   transaction history.
+3. Sort each account's history by `TIMESTAMP`.
+4. Create the following model features:
+   - `LOG_AMOUNT_NORM`: normalized log1p(transaction amount)
+   - `DIRECTION`: 1 for sent/outgoing, 0 for received/incoming
+   - `TIME_GAP_NORM`: normalized time gap since the previous transaction
+5. Compute normalization statistics using training accounts only.
+6. Split accounts into train/validation/test sets using a 70/15/15 split
+   with `random_state=42`.
+7. Build sliding windows independently for each account:
+   - context length: 15 transactions
+   - prediction length: 5 transactions
+   - stride: 5 transactions
+
+The notebook should be used as the executable source when reproducing
+the experiment. This file is documentation only and does not implement
+a second, independent preprocessing pipeline.
+"""

@@ -1,10 +1,24 @@
 """
-Fin-JEPA — adapted from the public fin-jepa repo (cedricwyh/fin-jepa) for AMLSim fraud detection.
+Fin-JEPA model implementation used for the AMLSim fraud-detection experiment.
 
-CHANGES FROM ORIGINAL model.py:
-- Fixed syntax error: class name "Fin-JEPA" (invalid Python, hyphen in identifier) -> "FinJEPA"
-- Device hardcoded for CUDA (Kaggle GPU) instead of Apple MPS
-- No other architectural changes -- encoder, predictor, and SIGReg are unmodified from source
+This implementation is adapted from the public Fin-JEPA repository:
+https://github.com/cedricwyh/fin-jepa
+
+Adaptation notes:
+- The original class name `Fin-JEPA` was changed to `FinJEPA` because
+  hyphens are not valid in Python class identifiers.
+- Device selection is automatic: CUDA is used when available, otherwise CPU.
+- The encoder, predictor, and SIGReg components follow the implementation
+  used by the experiment notebook.
+
+The AMLSim experiment itself is configured in `finjepa (1).ipynb`.
+In particular, the notebook instantiates the model with:
+- embedding dimension: 64
+- encoder layers: 3
+- predictor layers: 4
+- predictor heads: 4
+- SIGReg projections: 128
+- SIGReg weight: 0.1
 """
 import torch
 import torch.nn as nn
@@ -13,7 +27,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class SIGReg(nn.Module):
-    """Stops the model from collapsing all outputs into one lazy, identical value."""
+    """Regularization term used to reduce representation collapse."""
     def __init__(self, knots=17, num_proj=512):
         super().__init__()
         self.num_proj = num_proj
