@@ -120,9 +120,7 @@ The hybrid result combines learned Fin-JEPA features with handcrafted account-le
 
 ## Reproducibility
 
-For reproduction, start with:
-
-`finjepa (1).ipynb`
+For reproduction, start with the jupyter notebook.
 
 The notebook is the authoritative executable source for this experiment. It contains the complete AMLSim data preparation, model training, downstream evaluation, and result-generation workflow.
 
