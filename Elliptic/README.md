@@ -135,6 +135,14 @@ The complete experiment workflow is available in:
 
 `t-jepa-elliptic-fraud-detection(2).ipynb`
 
+## v2 notebook
+
+`tjepa_elliptic_v2.ipynb` is a cleaned version of the original notebook:
+data processing, T-JEPA pretraining, embedding extraction, classifier training
+and test evaluation only.
+
+**Test results (Elliptic, time steps 40+):** ROC-AUC 0.8164, PR-AUC 0.4854
+
 ## Reference
 
 The experiment is based on the T-JEPA repository:
