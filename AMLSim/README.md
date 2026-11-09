@@ -1,133 +1,79 @@
-# Fin-JEPA on AMLSim
+# Fin-JEPA for Fraud Detection on AMLSim
 
-This repository contains the AMLSim fraud-detection experiment using a
-Fin-JEPA-based self-supervised representation-learning approach.
+Fin-JEPA, a self-supervised sequence model adapted from the public
+[fin-jepa](https://github.com/cedricwyh/fin-jepa) repository, applied to bank
+transaction histories from the IBM AMLSim dataset. The model is pretrained
+without labels; its embeddings are then combined with hand-crafted account
+statistics to detect fraudulent accounts.
 
-The experiment adapts the sequence-learning setup of the public Fin-JEPA
-repository to the IBM AMLSim synthetic anti-money-laundering dataset.
+## Files
 
-Original Fin-JEPA repository:
-https://github.com/cedricwyh/fin-jepa
-
-## Repository contents
-
-| File | Purpose |
+| File | Description |
 |---|---|
-| `finjepa (1).ipynb` | **Main executable experiment.** Contains dataset loading, preprocessing, account splitting, window construction, Fin-JEPA pretraining, downstream fraud detection, XGBoost evaluation, and result generation. |
-| `model.py` | Fin-JEPA model implementation used by the experiment. |
-| `data_pipeline.py` | Documentation of the AMLSim preprocessing and windowing contract used in the notebook. |
-| `RESULTS.md` | Reported experiment results and evaluation details. |
+| `finjepa-amlsim-v2.ipynb` | **v2 (clean):** data processing, pretraining, account features, XGBoost and test evaluation only |
+| original notebook | Full experiment history, kept unchanged |
+| `model.py`, `data_pipeline.py` | Model code and data-pipeline notes |
+| `RESULTS.md` | Results summary |
 
-## Dataset
+## Method
 
-The experiment uses the IBM AMLSim synthetic anti-money-laundering dataset.
+1. **Data:** sent and received transactions are merged into one time-ordered history per
+   account. Row features: normalized log amount, direction (sent / received), normalized
+   time gap.
+2. **Split:** accounts are split 70 / 15 / 15 (random, seed 42). Normalization uses
+   training accounts only.
+3. **Windows:** 15 context + 5 target transactions, stride 5. Each window inherits its
+   account's fraud label.
+4. **Pretraining (no labels):** a shared per-transaction encoder, a causal transformer
+   predictor (4 layers, 4 heads, dim 64) and the SIGReg regularizer. Loss = prediction MSE
+   + 0.1 x SIGReg. AdamW, learning rate 1e-3, cosine schedule, 20 epochs, batch size 256.
+5. **Account features (76):** mean window embedding (64), prediction error mean and max (2),
+   and 10 hand-crafted statistics (transaction count, amount statistics, sent ratio,
+   number of distinct counterparties in total / incoming / outgoing, active span, time-gap
+   standard deviation).
+6. **Classifier:** XGBoost (up to 500 trees, depth 4, learning rate 0.03, class-imbalance
+   weighting, early stopping on validation AUC).
 
-The notebook expects these AMLSim files:
+## Results (v2 run, test accounts: 1,497, of which 247 fraud)
 
-- `accounts.csv`
-- `transactions.csv`
-- `alerts.csv`
+| Metric | Value |
+|---|---|
+| ROC-AUC | 0.8518 |
+| PR-AUC (Average Precision) | 0.6773 |
+| Precision (fraud, threshold 0.5) | 0.4258 |
+| Recall (fraud, threshold 0.5) | 0.7085 |
+| F1 (fraud, threshold 0.5) | 0.5319 |
+| Accuracy | 0.7943 |
 
-The dataset itself is not included in this repository.
+The PR-AUC baseline (random ranking) equals the fraud share, about 0.165.
 
-The notebook was originally run in a Kaggle environment and uses the dataset path configured there. When reproducing the experiment in another environment, update the dataset path in the notebook accordingly.
+Confusion matrix at threshold 0.5:
 
-## AMLSim preprocessing
+| | Predicted normal | Predicted fraud |
+|---|---|---|
+| True normal | 1,014 | 236 |
+| True fraud | 72 | 175 |
 
-Transactions are converted into account-level time-ordered histories.
+Precision when only the top-N highest-risk accounts are investigated:
 
-For each transaction:
+| Top N | Fraud caught | Precision | % of all fraud caught |
+|---|---|---|---|
+| 20 | 20 | 100.0% | 8.1% |
+| 50 | 49 | 98.0% | 19.8% |
+| 100 | 91 | 91.0% | 36.8% |
+| 150 | 117 | 78.0% | 47.4% |
+| 200 | 128 | 64.0% | 51.8% |
+| 300 | 158 | 52.7% | 64.0% |
+| 500 | 189 | 37.8% | 76.5% |
 
-- outgoing/sent transactions are assigned `DIRECTION = 1`
-- incoming/received transactions are assigned `DIRECTION = 0`
-- transaction amount is transformed using `log1p`
-- the time gap from the previous transaction is calculated
+## Notes
 
-The amount and time-gap features are standardized using statistics calculated from the training accounts only.
+- Hand-crafted counterparty counts are the most important features; the pretrained
+  embeddings alone give much weaker results in the original experiments.
+- Results vary slightly between runs because of GPU nondeterminism.
+- The downstream steps use the final-epoch pretrained weights.
 
-The model uses three input features:
+## How to run
 
-1. normalized log transaction amount
-2. transaction direction
-3. normalized time gap
-
-## Train / validation / test split
-
-The split is performed at the **account level**, not at the individual transaction level.
-
-Accounts are divided using:
-
-- 70% training
-- 15% validation
-- 15% test
-- `random_state = 42`
-
-This keeps the same account from appearing across different splits.
-
-## Sequence windowing
-
-Each account's transaction history is divided into sliding windows:
-
-- Context length: 15 transactions
-- Prediction length: 5 transactions
-- Stride: 5 transactions
-
-Only accounts/windows satisfying the required sequence length are used.
-
-## Fin-JEPA configuration
-
-The AMLSim experiment uses:
-
-- embedding dimension: 64
-- encoder layers: 3
-- predictor layers: 4
-- predictor heads: 4
-- SIGReg projections: 128
-- SIGReg weight: 0.1
-- batch size: 256
-- training epochs: 20
-- optimizer: AdamW
-- learning rate: `1e-3`
-- learning-rate schedule: cosine annealing
-- random seed: 42
-
-The best model is selected using validation loss.
-
-## Downstream fraud detection
-
-The learned representations are evaluated for account-level fraud detection using several downstream approaches.
-
-The experiment includes:
-
-1. MLP using the 64-dimensional Fin-JEPA embedding
-2. MLP using the embedding plus prediction error
-3. XGBoost using Fin-JEPA features, prediction-error features, and handcrafted account-level features
-
-The final XGBoost feature vector contains 76 features.
-
-See `RESULTS.md` for the exact reported metrics.
-
-## Results
-
-The final hybrid XGBoost model achieved:
-
-- Test ROC-AUC: **0.8574**
-- Test Average Precision: **0.6775**
-
-The test set contains 1,497 accounts, including 247 fraud accounts.
-
-The hybrid result combines learned Fin-JEPA features with handcrafted account-level statistics. Therefore, the result should not be interpreted as measuring the contribution of Fin-JEPA alone. Additional ablation experiments would be required for that comparison.
-
-## Reproducibility
-
-For reproduction, start with the jupyter notebook.
-
-The notebook is the authoritative executable source for this experiment. It contains the complete AMLSim data preparation, model training, downstream evaluation, and result-generation workflow.
-
-`data_pipeline.py` is provided as a documentation/reference file rather than as a second independent implementation of the preprocessing pipeline.
-
-## Reference
-
-Fin-JEPA:
-
-https://github.com/cedricwyh/fin-jepa
+Open `finjepa-amlsim-v2.ipynb` on Kaggle, attach the *IBM AMLSim example dataset*,
+enable a GPU and run all cells.
